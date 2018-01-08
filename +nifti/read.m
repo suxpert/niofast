@@ -1,18 +1,29 @@
-function [hdr, info, data] = Readniigz( file )
-% Readniigz read gziped nifti+ file directly
+function [hdr, info, data] = read(file)
+% READ read nifti+ file (nii or nii.gz)
+% Usage: [hdr, info, data] = read(file)
 %
-% Copyright (C) 2017 LiTuX, all rights reserved.
+% Copyright (C) 2017-2018 LiTuX, all rights reserved.
 
 %%
+if ~exist(file, 'file')
+    error('Can not find file %s.', file);
+end
+
 fis = java.io.FileInputStream(file);
-zis = java.util.zip.GZIPInputStream(fis);
+autoclosefis = onCleanup(@() fis.close);
+
+[~, ~, ext]  = fileparts(file);
+if strcmpi(ext, '.gz')
+    zis = java.util.zip.GZIPInputStream(fis);
+    autoclosezis = onCleanup(@() zis.close);
+    inputstream = zis;
+else
+    inputstream = fis;
+end
+
 iou = org.apache.commons.io.IOUtils;
 
-autoclosezis = onCleanup(@() zis.close);
-autoclosefis = onCleanup(@() fis.close);
-% autogc = onCleanup(@() java.lang.Runtime.getRuntime.gc);
-
-hsize = iou.toByteArray(zis, 4);
+hsize = iou.toByteArray(inputstream, 4);
 magicnum = typecast(hsize, 'int32');
 
 headersize.nifti1 = int32(348);
@@ -37,7 +48,7 @@ end % switch header size
 [header, datacast, datatype] = NifTi_header(ftype, bswap);
 hdr.(header{1, 2}) = headersize.(ftype);
 
-buffer = iou.toByteArray(zis, headersize.(ftype)-4);
+buffer = iou.toByteArray(inputstream, headersize.(ftype)-4);
 jj = 0;
 for ii = 2: size(header, 1)
     nbytes = header{ii, 4};
@@ -59,11 +70,11 @@ if nargout == 3
     else
         error('%g: unsupported data type %d.', hdr.datatype);
     end
-    zis.skip( double(hdr.vox_offset)-hdr.sizeof_hdr );
+    inputstream.skip( double(hdr.vox_offset)-hdr.sizeof_hdr );
     
     nbytes = prod(double(hdr.dim(2: hdr.dim(1)+1))) * convert{3};
-    bytedata = iou.toByteArray(zis, nbytes);
-%     bytedata = iou.toByteArray(zis);
+    bytedata = iou.toByteArray(inputstream, nbytes);
+%     bytedata = iou.toByteArray(inputstream);
     tmp = typecast(bytedata, convert{1});
     dat = convert{4}(tmp);
     

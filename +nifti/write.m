@@ -1,11 +1,14 @@
-function Writeniigz( template, data, file )
+function write( template, data, file )
+% WRITE write nifti+ file (nii or nii.gz)
+% Usage: write(template, data, file)
 %
+% Copyright (C) 2017-2018 LiTuX, all rights reserved.
 
 %%
 if isstruct(template) && isfield(template, 'sizeof_hdr')
     hdr = template;
 elseif exist(template, 'file')
-    hdr = Readniigz(template);
+    hdr = nifti.read(template);
 else
     error('Unrecognized template %s.', inputname(1));
 end
@@ -74,13 +77,17 @@ end
 dat = typecast(data(:), 'uint8');
 
 fos = java.io.FileOutputStream(file);
-zos = java.util.zip.GZIPOutputStream(fos);
-
-autoclosezos = onCleanup(@() zos.close);
 autoclosefos = onCleanup(@() fos.close);
-% autogc = onCleanup(@() java.lang.Runtime.getRuntime.gc);
+[~, ~, ext]  = fileparts(file);
+if strcmpi(ext, '.gz')
+    zos = java.util.zip.GZIPOutputStream(fos);
+    autoclosezos = onCleanup(@() zos.close);
+    outputstream = zos;
+else
+    outputstream = fos;
+end
 
-zos.write(buffer);
-zos.write(dat);
+outputstream.write(buffer);
+outputstream.write(dat);
 
 end
