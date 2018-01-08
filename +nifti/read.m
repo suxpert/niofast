@@ -2,6 +2,12 @@ function [hdr, info, data] = read(file)
 % READ read nifti+ file (nii or nii.gz)
 % Usage: [hdr, info, data] = read(file)
 %
+% I wrote this package because the known NifTi IO functions in matlab
+% (builtin, spm, fsl, freesurfer et al.) can only handle '.nii' file,
+% when reading gzipped file, they have to unzip it.
+% This function on the other hand, make use of some java methods to read
+% gzipped file 'directly', MAY improve performance especially for disk IO.
+%
 % Copyright (C) 2017-2018 LiTuX, all rights reserved.
 
 %%
@@ -9,21 +15,23 @@ if ~exist(file, 'file')
     error('Can not find file %s.', file);
 end
 
-fis = java.io.FileInputStream(file);
-autoclosefis = onCleanup(@() fis.close);
+[~, ~, ext] = fileparts(file);
 
-[~, ~, ext]  = fileparts(file);
 if strcmpi(ext, '.gz')
+    gzipped = true;
+    fis = java.io.FileInputStream(file);
     zis = java.util.zip.GZIPInputStream(fis);
+    autoclosefis = onCleanup(@() fis.close);
     autoclosezis = onCleanup(@() zis.close);
-    inputstream = zis;
+    readbuffer = @(len) org.apache.commons.io.IOUtils.toByteArray(zis, len);
 else
-    inputstream = fis;
+    gzipped = false;
+    fid = fopen(file, 'r');
+    autoclosefile = onCleanup(@() fclose(fid));
+    readbuffer = @(len) fread(fid, len, '*uint8');
 end
 
-iou = org.apache.commons.io.IOUtils;
-
-hsize = iou.toByteArray(inputstream, 4);
+hsize = readbuffer(4);
 magicnum = typecast(hsize, 'int32');
 
 headersize.nifti1 = int32(348);
@@ -48,7 +56,7 @@ end % switch header size
 [header, datacast, datatype] = NifTi_header(ftype, bswap);
 hdr.(header{1, 2}) = headersize.(ftype);
 
-buffer = iou.toByteArray(inputstream, headersize.(ftype)-4);
+buffer = readbuffer(headersize.(ftype)-4);
 jj = 0;
 for ii = 2: size(header, 1)
     nbytes = header{ii, 4};
@@ -70,14 +78,19 @@ if nargout == 3
     else
         error('%g: unsupported data type %d.', hdr.datatype);
     end
-    inputstream.skip( double(hdr.vox_offset)-hdr.sizeof_hdr );
     
-    nbytes = prod(double(hdr.dim(2: hdr.dim(1)+1))) * convert{3};
-    bytedata = iou.toByteArray(inputstream, nbytes);
-%     bytedata = iou.toByteArray(inputstream);
-    tmp = typecast(bytedata, convert{1});
-    dat = convert{4}(tmp);
-    
+    imgsize = prod(double(hdr.dim(2: hdr.dim(1)+1)));
+    if gzipped
+        zis.skip( double(hdr.vox_offset)-hdr.sizeof_hdr );
+
+        nbytes = imgsize * convert{3};
+        bytedata = readbuffer(nbytes);
+        tmp = typecast(bytedata, convert{1});
+    else
+        fseek(fid, hdr.vox_offset, 'bof');
+        tmp = fread(fid, imgsize, ['*', convert{1}]);
+    end
+    dat  = convert{4}(tmp);
     data = reshape(dat, hdr.dim(2: hdr.dim(1)+1));
     
     % Plz ref. to section #DATA SCALING in nifti1.h
@@ -95,7 +108,6 @@ end % function
 
 function info = hdrparse(hdr)
 %%
-
 if hdr.dim(1) >= 5 || hdr.dim(6) > 1
     % TODO, ref. to section #INTERPRETATION OF VOXEL DATA in nifti1.h
     % TODO, also check the intent_code et al.
