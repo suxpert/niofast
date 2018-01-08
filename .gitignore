@@ -1,0 +1,19 @@
+# Files that we want git to skip.
+
+# vim undo file
+*.un~
+
+# vim backup file
+*~
+
+# matlab auto save file
+*.asv
+*.m~
+
+# perhaps gedit et. al, backup file
+*.bak
+
+# log files
+*.log
+
+
